@@ -3,7 +3,15 @@ import os
 import sys
 
 from .brain import Engine
-from .state import default_state_path, load, save
+from .state import default_state_path, load
+
+
+def _force_utf8():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
 
 def demo(n, seed):
@@ -44,14 +52,13 @@ def demo(n, seed):
 
 
 def check():
+    import os as _os
     eng = Engine(seed=42)
-    seen = 0
     for _ in range(1600):
         m = eng.tick()
         if m is None:
             eng.paused = False
             continue
-        seen += 1
     cl = eng.conlang
     assert cl.converted_count() > 60, "转化的词太少"
     assert len(cl.eras_done) >= 8, "纪元推进太慢"
@@ -60,18 +67,35 @@ def check():
     assert cj != zh, "翻译未生效"
     assert "你好" not in cj, "翻译未生效"
     assert "咩啾" in cj or "啾" in cj, "句尾粒子缺失"
-    from .brain import Engine as E2
     from .state import load as _load, save as _save
     path = "/tmp/nini_check_state.json"
     _save(eng, path)
     eng2 = _load(path)
     assert eng2.conlang.converted_count() == cl.converted_count(), "存档不一致"
     assert eng2.msg_count == eng.msg_count
-    os.remove(path)
+    _os.remove(path)
     print("selfcheck OK")
 
 
+def _tui(engine, path):
+    import locale
+    for cand in ("", "C.UTF-8", "en_US.UTF-8"):
+        try:
+            locale.setlocale(locale.LC_ALL, cand)
+            break
+        except locale.Error:
+            continue
+    from .ui import TUI
+    TUI(engine, path).run()
+
+
+def _gui(engine, path):
+    from .gui import GUI
+    GUI(engine, path).run()
+
+
 def main(argv=None):
+    _force_utf8()
     ap = argparse.ArgumentParser(
         prog="nini", description="你你 · 挤语：两个「你」挤在一起，把中文一步步挤成新语言"
     )
@@ -79,6 +103,7 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=None, help="随机种子")
     ap.add_argument("--reset", action="store_true", help="清除存档重新开始")
     ap.add_argument("--check", action="store_true", help="自检后退出")
+    ap.add_argument("--tui", action="store_true", help="使用终端界面（默认使用图形界面）")
     ap.add_argument("--state", default=None, help="存档文件路径")
     args = ap.parse_args(argv)
 
@@ -95,12 +120,21 @@ def main(argv=None):
         demo(args.demo, args.seed)
         return
     engine = load(path, seed=args.seed)
+    if args.tui:
+        _tui(engine, path)
+        return
+    try:
+        _gui(engine, path)
+        return
+    except ImportError:
+        sys.stderr.write("未安装 tkinter，改用终端界面。\n")
+    except Exception as e:
+        sys.stderr.write(f"图形界面不可用（{e}），改用终端界面。\n")
     if not sys.stdin.isatty():
         demo(40, args.seed)
         print("（非终端环境，已自动进入演示模式；在终端里运行可交互界面）")
         return
-    from .ui import TUI
-    TUI(engine, path).run()
+    _tui(engine, path)
 
 
 if __name__ == "__main__":
